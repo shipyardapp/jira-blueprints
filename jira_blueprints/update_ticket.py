@@ -22,57 +22,54 @@ def get_args():
     parser.add_argument('--project-key', dest='project_key', required=True)
     parser.add_argument('--username', dest='username', required=True)
     parser.add_argument('--access-token', dest='access_token', required=True)
-    parser.add_argument('--summary', dest='summary', required=False)
-    parser.add_argument('--description', dest='description', required=False)
-    parser.add_argument('--issue-type', dest='issue_type', required=False)
-    parser.add_argument('--custom-json', dest='custom_json', required=False)
+    parser.add_argument('--ticket-key', dest='ticket_key', required=True)
+    parser.add_argument('--summary', dest='summary', required=True)
+    parser.add_argument('--description', dest='description', required=True)
+    parser.add_argument('--issue-type', dest='issue_type', required=True)
+    parser.add_argument('--additional-fields', dest='additional_fields', required=False)
     args = parser.parse_args()
     return args
 
 
-def generate_payload(project_key, summary, 
-                     description, issue_type):
-    """ Creates a JIRA Ticket json payload for use with the Jira create ticket
-    rest API. 
+def generate_payload_with_custom(project_key, summary, 
+                     description, issue_type, custom_fields=None):
+    """ Generates a JIRA Ticket json payload as well as adds custom fields
+    to the payload if any are present.
     see: https://developer.atlassian.com/server/jira/platform
-                /jira-rest-api-examples/#creating-an-issue-examples
+                /jira-rest-api-examples/#editing-an-issue-examples
     for an example of a basic payload.
     """
     
     payload = {
-        "fields": {
-           "project":
-           {
-              "key": project_key
-           },
-           "summary": summary,
-           "description": description,
-           "issuetype": {
-              "name": issue_type
-           }
-       }
+        "fields" : {
+            "summary": summary,
+            "description": description,
+            "issuetype": {"name": issue_type}
+        }
     }
+    if custom_fields:
+        # add custom fields to the update fields payload
+        payload['fields'].update()
     return payload
 
 
-def create_ticket(username, token, jira_url, payload):
+def update_existing_ticket(username, token, jira_url, ticket_key, payload):
     """ Triggers the Create Issue API and adds a new ticket onto JIRA"""
     
-    create_ticket_endpoint = f"https://{jira_url}/rest/api/3/issue"
+    update_ticket_endpoint = f"https://{jira_url}/rest/api/2/issue/{ticket_key}"
     headers = {
       'Content-Type': 'application/json'
     }
 
-    response = requests.post(create_ticket_endpoint, 
+    response = requests.put(update_ticket_endpoint, 
                              headers=headers, 
                              json=payload, 
                              auth=HTTPBasicAuth(username, token)
                              )
     
     if response.status_code == requests.codes.ok:
-        new_ticket_key =  response.json()['key']
-        print(f"Ticket created successfully with Key name: {new_ticket_key}")
-        return response.json()
+        print(f"Ticket {ticket_key} created updated")
+        return
         
     elif response.status_code == 401: # Permissions Error
         print("You do not have the required permissions to create an issue in ",
@@ -96,26 +93,15 @@ def main():
     access_token = args.access_token
     project_key = args.project_key
     jira_url = args.jira_url
-    
-    # check if custom json first, else generate payload using args
-    if args.custom_json:
-        payload = args.custom_json
-    else:
-        summary = args.summary
-        description = args.description
-        issue_type = args.issue_type
-        payload = generate_payload(project_key, summary, 
-                                   description, issue_type)
-        
+    additional_fields = args.additional_fields
+    summary = args.summary
+    description = args.description
+    issue_type = args.issue_type
+    ticket_key = args.ticket_key
+    # generate payload
+    payload = generate_payload_with_custom(project_key, summary, 
+                                description, issue_type, custom_fields=additional_fields)
 
-    issue_data = create_ticket(username, access_token, jira_url, payload)
-    issue_id = issue_data['id']
-    
-    # save issue to responses
-    issue_data_filename = shipyard.files.combine_folder_and_file_name(
-        artifact_subfolder_paths['responses'],
-        f'create_ticket_{issue_id}_response.json')
-    shipyard.files.write_json_to_file(issue_data, issue_data_filename)
-
+    update_existing_ticket(username, access_token, jira_url, ticket_key, payload)
     
 
