@@ -22,9 +22,9 @@ def get_args():
     parser.add_argument('--project-key', dest='project_key', required=True)
     parser.add_argument('--username', dest='username', required=True)
     parser.add_argument('--access-token', dest='access_token', required=True)
-    parser.add_argument('--summary', dest='summary', required=False)
-    parser.add_argument('--description', dest='description', required=False)
-    parser.add_argument('--issue-type', dest='issue_type', required=False)
+    parser.add_argument('--summary', dest='summary', required=True)
+    parser.add_argument('--description', dest='description', required=True)
+    parser.add_argument('--issue-type', dest='issue_type', required=True)
     parser.add_argument('--custom-json', dest='custom_json', required=False)
     args = parser.parse_args()
     return args
@@ -58,7 +58,7 @@ def generate_payload(project_key, summary,
 def create_ticket(username, token, jira_url, payload):
     """ Triggers the Create Issue API and adds a new ticket onto JIRA"""
     
-    create_ticket_endpoint = f"https://{jira_url}/rest/api/3/issue"
+    create_ticket_endpoint = f"https://{jira_url}/rest/api/2/issue"
     headers = {
       'Content-Type': 'application/json'
     }
@@ -69,7 +69,7 @@ def create_ticket(username, token, jira_url, payload):
                              auth=HTTPBasicAuth(username, token)
                              )
     
-    if response.status_code == requests.codes.ok:
+    if response.status_code == 201: # created successfuly
         new_ticket_key =  response.json()['key']
         print(f"Ticket created successfully with Key name: {new_ticket_key}")
         return response.json()
@@ -85,8 +85,10 @@ def create_ticket(username, token, jira_url, payload):
         sys.exit(exit_codes.BAD_REQUEST)
 
     else: # Some other error
-        print("an Unknown Error has occured when attempting your request:",
-              f"{response.text}")
+        print(
+            f"an Unknown HTTP Status {response.status_code} and response occurred when attempting your request: ",
+            f"{response.text}"
+        )
         sys.exit(exit_codes.UNKNOWN_ERROR)
     
 
@@ -97,16 +99,14 @@ def main():
     project_key = args.project_key
     jira_url = args.jira_url
     
-    # check if custom json first, else generate payload using args
+    summary = args.summary
+    description = args.description
+    issue_type = args.issue_type
+    payload = generate_payload(project_key, summary, 
+                                description, issue_type)
+    # add custom fields if they exist
     if args.custom_json:
-        payload = args.custom_json
-    else:
-        summary = args.summary
-        description = args.description
-        issue_type = args.issue_type
-        payload = generate_payload(project_key, summary, 
-                                   description, issue_type)
-        
+        payload['fields'].update(args.custom_json)
 
     issue_data = create_ticket(username, access_token, jira_url, payload)
     issue_id = issue_data['id']
