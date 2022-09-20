@@ -49,7 +49,7 @@ def generate_payload_with_custom(project_key, summary,
     }
     if custom_fields:
         # add custom fields to the update fields payload
-        payload['fields'].update()
+        payload['fields'].update(custom_fields)
     return payload
 
 
