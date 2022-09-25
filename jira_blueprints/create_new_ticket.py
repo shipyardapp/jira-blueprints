@@ -3,6 +3,7 @@ import sys
 import requests
 from requests.auth import HTTPBasicAuth
 import re
+from ast import literal_eval
 import shipyard_utils as shipyard
 try:
     import exit_codes
@@ -187,7 +188,7 @@ def main():
                                description, issue_type, assignee_user_id)
     # add custom fields if they exist
     if args.custom_json:
-        payload['fields'].update(args.custom_json)
+        payload['fields'].update(literal_eval(args.custom_json))
 
     issue_data = create_ticket(username, access_token, jira_url, payload)
     issue_id = issue_data['id']
