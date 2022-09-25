@@ -2,8 +2,8 @@ import argparse
 import sys
 import requests
 from requests.auth import HTTPBasicAuth
+import re
 import shipyard_utils as shipyard
-import code
 try:
     import exit_codes
 except BaseException:
@@ -28,6 +28,21 @@ def get_args():
     parser.add_argument('--issue-type', dest='issue_type', required=True)
     parser.add_argument('--assignee', dest='assignee', required=False)
     parser.add_argument('--custom-json', dest='custom_json', required=False)
+    parser.add_argument(
+        '--source-file-name',
+        dest='source_file_name',
+        required=False)
+    parser.add_argument(
+        '--source-folder-name',
+        dest='source_folder_name',
+        default='',
+        required=False)
+    parser.add_argument('--source-file-name-match-type',
+                        dest='source_file_name_match_type',
+                        choices={'exact_match', 'regex_match'},
+                        default='exact_match',
+                        required=False)
+
     args = parser.parse_args()
     return args
 
@@ -126,6 +141,28 @@ def find_user_id(users_response, assignee):
     return assignee_user_id
 
 
+def attach_file_to_ticket(username, token, jira_url, issue_key, file_path):
+    """ Attaches files to a Jira ticket."""
+
+    attachment_endpoint = f"https://{jira_url}/rest/api/2/issue/{issue_key}/attachments"
+    headers = {
+        "Accept": "application/json",
+        "X-Atlassian-Token": "no-check"
+    }
+
+    file_payload = {
+        "file": (file_path, open(file_path, "rb"), "application-type")
+    }
+    response = requests.post(attachment_endpoint,
+                             headers=headers,
+                             auth=HTTPBasicAuth(username, token),
+                             files=file_payload)
+
+    if response.status_code == 200:
+        print(f'{file_path} was successfully attached to {issue_key}')
+    return response
+
+
 def main():
     args = get_args()
     username = args.username
@@ -137,6 +174,9 @@ def main():
     description = args.description
     issue_type = args.issue_type
     assignee = args.assignee
+    source_file_name = args.source_file_name
+    source_folder_name = args.source_folder_name
+    source_file_name_match_type = args.source_file_name_match_type
 
     if assignee:
         users = get_all_users(username, access_token, jira_url)
@@ -151,6 +191,28 @@ def main():
 
     issue_data = create_ticket(username, access_token, jira_url, payload)
     issue_id = issue_data['id']
+
+    if source_file_name_match_type == 'regex_match':
+        all_local_files = shipyard.files.find_all_local_file_names(
+            source_folder_name)
+        matching_file_names = shipyard.files.find_all_file_matches(
+            all_local_files, re.compile(source_file_name))
+        for index, file_name in enumerate(matching_file_names):
+            attach_file_to_ticket(
+                username,
+                access_token,
+                jira_url,
+                issue_id,
+                file_name)
+    else:
+        source_file_path = shipyard.files.combine_folder_and_file_name(
+            source_folder_name, source_file_name)
+        attach_file_to_ticket(
+            username,
+            access_token,
+            jira_url,
+            issue_id,
+            source_file_path)
 
     # save issue to responses
     issue_data_filename = shipyard.files.combine_folder_and_file_name(
