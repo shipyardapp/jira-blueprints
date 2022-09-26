@@ -26,7 +26,22 @@ def get_args():
     parser.add_argument('--summary', dest='summary', required=True)
     parser.add_argument('--description', dest='description', required=True)
     parser.add_argument('--issue-type', dest='issue_type', required=True)
-    parser.add_argument('--additional-fields', dest='additional_fields', required=False)
+    parser.add_argument('--assignee', dest='assignee', required=False)
+    parser.add_argument('--custom-json', dest='custom_json', required=False)
+    parser.add_argument(
+        '--source-file-name',
+        dest='source_file_name',
+        required=False)
+    parser.add_argument(
+        '--source-folder-name',
+        dest='source_folder_name',
+        default='',
+        required=False)
+    parser.add_argument('--source-file-name-match-type',
+                        dest='source_file_name_match_type',
+                        choices={'exact_match', 'regex_match'},
+                        default='exact_match',
+                        required=False)
     args = parser.parse_args()
     return args
 
@@ -51,6 +66,35 @@ def generate_payload_with_custom(project_key, summary,
         # add custom fields to the update fields payload
         payload['fields'].update(custom_fields)
     return payload
+
+
+def get_all_users(username, token, jira_url):
+    """ Returns a list of all Jira users."""
+
+    # TODO: Make this loop through pages so the response isn't too large.
+    users_endpoint = f"https://{jira_url}/rest/api/2/users/?maxResults=1000"
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    response = requests.get(users_endpoint,
+                            headers=headers,
+                            auth=HTTPBasicAuth(username, token)
+                            )
+    users = response.json()
+    return users
+
+
+def find_user_id(users_response, assignee):
+
+    assignee_user_id = None
+    for user in users_response:
+        if user['displayName'] == assignee:
+            assignee_user_id = user['accountId']
+            break
+    if not assignee_user_id:
+        print(
+            f'Assignee {assignee} could not be found. Using project default assignee.')
+    return assignee_user_id
 
 
 def update_existing_ticket(username, token, jira_url, ticket_key, payload):
