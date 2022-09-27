@@ -49,7 +49,7 @@ def get_args():
 
 
 def generate_payload(project_key, summary,
-                     description, issue_type, assignee_user_id):
+                     description, issue_type, assignee_user_id=None):
     """ Creates a JIRA Ticket json payload for use with the Jira create ticket
     rest API.
     see: https://developer.atlassian.com/server/jira/platform
@@ -67,12 +67,18 @@ def generate_payload(project_key, summary,
             "description": description,
             "issuetype": {
                 "name": issue_type
-            },
+            }
+        }
+    }
+    if assignee_user_id:
+        # add assign json to payload if exists
+        assign_data = {
             "assignee": {
                 "id": assignee_user_id
             }
         }
-    }
+        payload["fields"].update(assign_data)
+
     return payload
 
 
