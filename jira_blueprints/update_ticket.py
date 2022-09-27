@@ -1,9 +1,9 @@
 import argparse
 import sys
 import requests
-from requests.auth import HTTPBasicAuth
 import re
 from ast import literal_eval
+from requests.auth import HTTPBasicAuth
 import shipyard_utils as shipyard
 try:
     import exit_codes
@@ -24,9 +24,10 @@ def get_args():
     parser.add_argument('--project-key', dest='project_key', required=True)
     parser.add_argument('--username', dest='username', required=True)
     parser.add_argument('--access-token', dest='access_token', required=True)
-    parser.add_argument('--summary', dest='summary', required=True)
-    parser.add_argument('--description', dest='description', required=True)
-    parser.add_argument('--issue-type', dest='issue_type', required=True)
+    parser.add_argument('--ticket-key', dest='ticket_key', required=True)
+    parser.add_argument('--summary', dest='summary', required=False)
+    parser.add_argument('--description', dest='description', required=False)
+    parser.add_argument('--issue-type', dest='issue_type', required=False)
     parser.add_argument('--assignee', dest='assignee', required=False)
     parser.add_argument('--custom-json', dest='custom_json', required=False)
     parser.add_argument(
@@ -43,33 +44,28 @@ def get_args():
                         choices={'exact_match', 'regex_match'},
                         default='exact_match',
                         required=False)
-
     args = parser.parse_args()
     return args
 
 
-def generate_payload(project_key, summary,
-                     description, issue_type, assignee_user_id=None):
-    """ Creates a JIRA Ticket json payload for use with the Jira create ticket
-    rest API.
+def generate_payload_with_custom(project_key, summary, 
+                     description, issue_type, custom_fields=None, assignee_user_id=None):
+    """ Generates a JIRA Ticket json payload as well as adds custom fields
+    to the payload if any are present.
     see: https://developer.atlassian.com/server/jira/platform
-                /jira-rest-api-examples/#creating-an-issue-examples
+                /jira-rest-api-examples/#editing-an-issue-examples
     for an example of a basic payload.
     """
-
+    
     payload = {
-        "fields": {
-            "project":
-            {
-                "key": project_key
-            },
-            "summary": summary,
-            "description": description,
-            "issuetype": {
-                "name": issue_type
-            }
-        }
+        "fields" : {}
     }
+    if summary:
+        payload['fields']['summary'] = summary
+    if description:
+        payload['fields']['description'] = description
+    if project_key:
+        payload['fields']['project']['key'] = project_key
     if assignee_user_id:
         # add assign json to payload if exists
         assign_data = {
@@ -78,45 +74,10 @@ def generate_payload(project_key, summary,
             }
         }
         payload["fields"].update(assign_data)
-
+    if custom_fields:
+        # add custom fields to the update fields payload
+        payload['fields'].update(custom_fields)
     return payload
-
-
-def create_ticket(username, token, jira_url, payload):
-    """ Triggers the Create Issue API and adds a new ticket onto JIRA"""
-
-    create_ticket_endpoint = f"https://{jira_url}/rest/api/2/issue"
-    headers = {
-        'Content-Type': 'application/json'
-    }
-
-    response = requests.post(create_ticket_endpoint,
-                             headers=headers,
-                             json=payload,
-                             auth=HTTPBasicAuth(username, token)
-                             )
-
-    if response.status_code == 201:  # created successfuly
-        new_ticket_key = response.json()['key']
-        print(f"Ticket created successfully with Key name: {new_ticket_key}")
-        return response.json()
-
-    elif response.status_code == 401:  # Permissions Error
-        print(
-            "You do not have the required permissions to create an issue in ",
-            "this project")
-        sys.exit(exit_codes.INVALID_CREDENTIALS)
-
-    elif response.status_code == 400:  # Bad Request
-        print("JIRA responded with Bad Request Error. ",
-              f"Response message: {response.text}")
-        sys.exit(exit_codes.BAD_REQUEST)
-
-    else:  # Some other error
-        print(
-            f"an Unknown HTTP Status {response.status_code} and response occurred when attempting your request: ",
-            f"{response.text}")
-        sys.exit(exit_codes.UNKNOWN_ERROR)
 
 
 def get_all_users(username, token, jira_url):
@@ -170,16 +131,51 @@ def attach_file_to_ticket(username, token, jira_url, issue_key, file_path):
     return response
 
 
+def update_existing_ticket(username, token, jira_url, ticket_key, payload):
+    """ Triggers the Create Issue API and adds a new ticket onto JIRA"""
+    
+    update_ticket_endpoint = f"https://{jira_url}/rest/api/2/issue/{ticket_key}"
+    headers = {
+      'Content-Type': 'application/json'
+    }
+
+    response = requests.put(update_ticket_endpoint, 
+                             headers=headers, 
+                             json=payload, 
+                             auth=HTTPBasicAuth(username, token)
+                             )
+    
+    if response.status_code == requests.codes.ok:
+        print(f"Ticket {ticket_key} created updated")
+        return
+        
+    elif response.status_code == 401: # Permissions Error
+        print("You do not have the required permissions to create an issue in ",
+              "this project")
+        sys.exit(exit_codes.INVALID_CREDENTIALS)
+
+    elif response.status_code == 400: # Bad Request
+        print("JIRA responded with Bad Request Error. ",
+              f"Response message: {response.text}")
+        sys.exit(exit_codes.BAD_REQUEST)
+
+    else: # Some other error
+        print("an Unknown Error has occured when attempting your request:",
+              f"{response.text}")
+        sys.exit(exit_codes.UNKNOWN_ERROR)
+    
+
 def main():
     args = get_args()
     username = args.username
     access_token = args.access_token
     project_key = args.project_key
     jira_url = args.jira_url
-
+    additional_fields = literal_eval(args.additional_fields)
     summary = args.summary
     description = args.description
     issue_type = args.issue_type
+    ticket_key = args.ticket_key
     assignee = args.assignee
     source_file_name = args.source_file_name
     source_folder_name = args.source_folder_name
@@ -190,14 +186,13 @@ def main():
         assignee_user_id = find_user_id(users, assignee)
     else:
         assignee_user_id = None
-    payload = generate_payload(project_key, summary,
-                               description, issue_type, assignee_user_id)
-    # add custom fields if they exist
-    if args.custom_json:
-        payload['fields'].update(literal_eval(args.custom_json))
+    # generate payload
+    payload = generate_payload_with_custom(project_key, summary, 
+                                description, issue_type, 
+                                custom_fields=additional_fields, 
+                                assignee_user_id=assignee_user_id)
 
-    issue_data = create_ticket(username, access_token, jira_url, payload)
-    issue_id = issue_data['id']
+    update_existing_ticket(username, access_token, jira_url, ticket_key, payload)
 
     if source_file_name_match_type == 'regex_match':
         all_local_files = shipyard.files.find_all_local_file_names(
@@ -209,7 +204,7 @@ def main():
                 username,
                 access_token,
                 jira_url,
-                issue_id,
+                ticket_key,
                 file_name)
     else:
         source_file_path = shipyard.files.combine_folder_and_file_name(
@@ -218,15 +213,7 @@ def main():
             username,
             access_token,
             jira_url,
-            issue_id,
+            ticket_key,
             source_file_path)
+    
 
-    # save issue to responses
-    issue_data_filename = shipyard.files.combine_folder_and_file_name(
-        artifact_subfolder_paths['responses'],
-        f'create_ticket_{issue_id}_response.json')
-    shipyard.files.write_json_to_file(issue_data, issue_data_filename)
-
-
-if __name__ == "__main__":
-    main()
