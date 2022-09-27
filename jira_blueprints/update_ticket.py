@@ -1,6 +1,8 @@
 import argparse
 import sys
 import requests
+import re
+from ast import literal_eval
 from requests.auth import HTTPBasicAuth
 import shipyard_utils as shipyard
 try:
@@ -169,7 +171,7 @@ def main():
     access_token = args.access_token
     project_key = args.project_key
     jira_url = args.jira_url
-    additional_fields = args.additional_fields
+    additional_fields = literal_eval(args.additional_fields)
     summary = args.summary
     description = args.description
     issue_type = args.issue_type
