@@ -68,7 +68,6 @@ def generate_payload(project_key, summary,
             "issuetype": {
                 "name": issue_type
             }
-        }
     }
     if assignee_user_id:
         # add assign json to payload if exists
