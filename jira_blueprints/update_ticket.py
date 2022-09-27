@@ -23,9 +23,9 @@ def get_args():
     parser.add_argument('--username', dest='username', required=True)
     parser.add_argument('--access-token', dest='access_token', required=True)
     parser.add_argument('--ticket-key', dest='ticket_key', required=True)
-    parser.add_argument('--summary', dest='summary', required=True)
-    parser.add_argument('--description', dest='description', required=True)
-    parser.add_argument('--issue-type', dest='issue_type', required=True)
+    parser.add_argument('--summary', dest='summary', required=False)
+    parser.add_argument('--description', dest='description', required=False)
+    parser.add_argument('--issue-type', dest='issue_type', required=False)
     parser.add_argument('--assignee', dest='assignee', required=False)
     parser.add_argument('--custom-json', dest='custom_json', required=False)
     parser.add_argument(
@@ -47,7 +47,7 @@ def get_args():
 
 
 def generate_payload_with_custom(project_key, summary, 
-                     description, issue_type, custom_fields=None):
+                     description, issue_type, custom_fields=None, assignee_user_id=None):
     """ Generates a JIRA Ticket json payload as well as adds custom fields
     to the payload if any are present.
     see: https://developer.atlassian.com/server/jira/platform
@@ -56,12 +56,22 @@ def generate_payload_with_custom(project_key, summary,
     """
     
     payload = {
-        "fields" : {
-            "summary": summary,
-            "description": description,
-            "issuetype": {"name": issue_type}
-        }
+        "fields" : {}
     }
+    if summary:
+        payload['fields']['summary'] = summary
+    if description:
+        payload['fields']['description'] = description
+    if project_key:
+        payload['fields']['project']['key'] = project_key
+    if assignee_user_id:
+        # add assign json to payload if exists
+        assign_data = {
+            "assignee": {
+                "id": assignee_user_id
+            }
+        }
+        payload["fields"].update(assign_data)
     if custom_fields:
         # add custom fields to the update fields payload
         payload['fields'].update(custom_fields)
@@ -95,6 +105,28 @@ def find_user_id(users_response, assignee):
         print(
             f'Assignee {assignee} could not be found. Using project default assignee.')
     return assignee_user_id
+
+
+def attach_file_to_ticket(username, token, jira_url, issue_key, file_path):
+    """ Attaches files to a Jira ticket."""
+
+    attachment_endpoint = f"https://{jira_url}/rest/api/2/issue/{issue_key}/attachments"
+    headers = {
+        "Accept": "application/json",
+        "X-Atlassian-Token": "no-check"
+    }
+
+    file_payload = {
+        "file": (file_path, open(file_path, "rb"), "application-type")
+    }
+    response = requests.post(attachment_endpoint,
+                             headers=headers,
+                             auth=HTTPBasicAuth(username, token),
+                             files=file_payload)
+
+    if response.status_code == 200:
+        print(f'{file_path} was successfully attached to {issue_key}')
+    return response
 
 
 def update_existing_ticket(username, token, jira_url, ticket_key, payload):
@@ -142,10 +174,44 @@ def main():
     description = args.description
     issue_type = args.issue_type
     ticket_key = args.ticket_key
+    assignee = args.assignee
+    source_file_name = args.source_file_name
+    source_folder_name = args.source_folder_name
+    source_file_name_match_type = args.source_file_name_match_type
+
+    if assignee:
+        users = get_all_users(username, access_token, jira_url)
+        assignee_user_id = find_user_id(users, assignee)
+    else:
+        assignee_user_id = None
     # generate payload
     payload = generate_payload_with_custom(project_key, summary, 
-                                description, issue_type, custom_fields=additional_fields)
+                                description, issue_type, 
+                                custom_fields=additional_fields, 
+                                assignee_user_id=assignee_user_id)
 
     update_existing_ticket(username, access_token, jira_url, ticket_key, payload)
+
+    if source_file_name_match_type == 'regex_match':
+        all_local_files = shipyard.files.find_all_local_file_names(
+            source_folder_name)
+        matching_file_names = shipyard.files.find_all_file_matches(
+            all_local_files, re.compile(source_file_name))
+        for index, file_name in enumerate(matching_file_names):
+            attach_file_to_ticket(
+                username,
+                access_token,
+                jira_url,
+                ticket_key,
+                file_name)
+    else:
+        source_file_path = shipyard.files.combine_folder_and_file_name(
+            source_folder_name, source_file_name)
+        attach_file_to_ticket(
+            username,
+            access_token,
+            jira_url,
+            ticket_key,
+            source_file_path)
     
 
